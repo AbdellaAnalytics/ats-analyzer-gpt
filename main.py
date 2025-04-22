@@ -1,47 +1,57 @@
 from fastapi import FastAPI, UploadFile, File
-import PyPDF2
-import docx2txt
-import tempfile
-import openai
+from fastapi.middleware.cors import CORSMiddleware
+from openai import OpenAI
 import os
+import tempfile
+import docx2txt
+import PyPDF2
 from dotenv import load_dotenv
 
-# تحميل المفتاح من .env
+# ✅ تحميل المتغيرات من .env
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
 
+# ✅ إعداد FastAPI
 app = FastAPI()
 
-@app.post("/upload/")
-async def upload_file(file: UploadFile = File(...)):
-    content = ""
+# ✅ إعداد CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-    # استخراج النص من PDF
+# ✅ تحميل مفتاح API من environment
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# ✅ دالة لاستخراج النص من ملفات PDF و DOCX
+def extract_text(file: UploadFile):
     if file.filename.endswith(".pdf"):
-        reader = PyPDF2.PdfReader(file.file)
-        for page in reader.pages:
-            content += page.extract_text()
-
-    # استخراج النص من DOCX
+        pdf_reader = PyPDF2.PdfReader(file.file)
+        text = ""
+        for page in pdf_reader.pages:
+            text += page.extract_text()
+        return text
     elif file.filename.endswith(".docx"):
         with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
-            tmp.write(await file.read())
+            tmp.write(file.file.read())
             tmp_path = tmp.name
-        content = docx2txt.process(tmp_path)
-
+        return docx2txt.process(tmp_path)
     else:
-        return {"error": "Only PDF or DOCX files are allowed."}
+        return "Unsupported file type"
 
-    # تحليل المحتوى باستخدام GPT
-    response = openai.ChatCompletion.create(
+# ✅ مسار الرفع
+@app.post("/upload/")
+async def upload_file(file: UploadFile = File(...)):
+    extracted_text = extract_text(file)
+
+    response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[
-            {"role": "system", "content": "You are an expert resume reviewer."},
-            {"role": "user", "content": f"Analyze the following resume and give feedback:\n\n{content}"}
+            {"role": "system", "content": "You are a helpful assistant that reviews CVs and gives feedback."},
+            {"role": "user", "content": extracted_text}
         ]
     )
 
-    feedback = response['choices'][0]['message']['content']
-    return {
-        "summary": feedback
-    }
+    return {"feedback": response.choices[0].message.content}
