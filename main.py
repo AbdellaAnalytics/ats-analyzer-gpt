@@ -7,14 +7,14 @@ import docx2txt
 import PyPDF2
 import tempfile
 
-# ✅ تحميل متغيرات البيئة
+# تحميل متغيرات البيئة
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# ✅ إنشاء تطبيق FastAPI
+# إنشاء التطبيق
 app = FastAPI()
 
-# ✅ تفعيل CORS للفرونت إند
+# السماح بالوصول من جميع المواقع (CORS)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -23,31 +23,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ✅ دالة استخراج النصوص من الملفات
+# استخراج النص من ملفات PDF و DOCX
 def extract_text_from_file(file: UploadFile):
     if file.filename.endswith(".pdf"):
         reader = PyPDF2.PdfReader(file.file)
         return "\n".join([page.extract_text() or "" for page in reader.pages])
     elif file.filename.endswith(".docx"):
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as temp_file:
-            temp_file.write(file.file.read())
-            return docx2txt.process(temp_file.name)
-    else:
-        return ""
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
+            tmp.write(file.file.read())
+            return docx2txt.process(tmp.name)
+    return ""
 
-# ✅ الراوت الرئيسي لتحليل السيرة الذاتية
+# تحليل السيرة الذاتية باستخدام GPT
 @app.post("/upload/")
 async def upload_file(file: UploadFile = File(...)):
-    text = extract_text_from_file(file)
-    if not text:
-        return {"error": "لم يتم استخراج أي نص من الملف"}
+    content = extract_text_from_file(file)
+    if not content:
+        return {"error": "الملف لا يحتوي على نص يمكن تحليله."}
 
     response = await openai.ChatCompletion.acreate(
         model="gpt-3.5-turbo",
         messages=[
-            {"role": "system", "content": "أنت محلل سيرة ذاتية يستخدم نظام ATS. قم بتحليل السيرة الذاتية التالية."},
-            {"role": "user", "content": f"Analyze this resume:\n{text}"}
+            {"role": "system", "content": "أنت مساعد توظيف متخصص في تحليل السير الذاتية بناءً على معايير ATS."},
+            {"role": "user", "content": content}
         ]
     )
-
     return {"result": response.choices[0].message.content}
