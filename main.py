@@ -1,23 +1,20 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from openai import OpenAI
+import os
+import openai
+from dotenv import load_dotenv
 import docx2txt
 import PyPDF2
 import tempfile
-import os
-from dotenv import load_dotenv
 
-# ✅ تحميل متغيرات البيئة
+# ✅ Load env
 load_dotenv()
-api_key = os.getenv("OPENAI_API_KEY")
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# ✅ تهيئة OpenAI client
-client = OpenAI(api_key=api_key)
-
-# ✅ إنشاء تطبيق FastAPI
+# ✅ FastAPI app
 app = FastAPI()
 
-# ✅ إعداد CORS
+# ✅ CORS config
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -26,42 +23,31 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ✅ استخراج النص من ملف PDF أو DOCX
-def extract_text(file: UploadFile):
+# ✅ Extract text
+def extract_text_from_file(file: UploadFile):
     if file.filename.endswith(".pdf"):
         reader = PyPDF2.PdfReader(file.file)
-        text = ""
-        for page in reader.pages:
-            text += page.extract_text() or ""
-        return text
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
     elif file.filename.endswith(".docx"):
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
-            tmp.write(file.file.read())
-            tmp_path = tmp.name
-        text = docx2txt.process(tmp_path)
-        os.remove(tmp_path)
-        return text
-    else:
-        return "Unsupported file type"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as temp_file:
+            temp_file.write(file.file.read())
+            temp_path = temp_file.name
+        return docx2txt.process(temp_path)
+    return ""
 
-# ✅ المسار الأساسي
-@app.get("/")
-def read_root():
-    return {"message": "ATS Analyzer API is running."}
-
-# ✅ مسار الرفع والتحليل
+# ✅ Upload endpoint
 @app.post("/upload/")
 async def upload_file(file: UploadFile = File(...)):
-    text = extract_text(file)
+    text = extract_text_from_file(file)
+    if not text:
+        return {"error": "No text extracted"}
 
-    # ✅ استدعاء OpenAI لتحليل النص
-    response = client.chat.completions.create(
+    response = await openai.ChatCompletion.acreate(
         model="gpt-3.5-turbo",
         messages=[
-            {"role": "system", "content": "You are an expert resume analyst."},
+            {"role": "system", "content": "You are an ATS resume analyzer."},
             {"role": "user", "content": f"Analyze this resume:\n{text}"}
         ]
     )
 
-    analysis = response.choices[0].message.content
-    return {"analysis": analysis}
+    return {"result": response.choices[0].message.content}
