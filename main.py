@@ -1,20 +1,23 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-import openai
-import os
-from dotenv import load_dotenv
+from openai import OpenAI
 import docx2txt
 import PyPDF2
 import tempfile
+import os
+from dotenv import load_dotenv
 
-# تحميل متغيرات البيئة
+# ✅ تحميل متغيرات البيئة
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
+api_key = os.getenv("OPENAI_API_KEY")
 
-# إعداد التطبيق
+# ✅ تهيئة OpenAI client
+client = OpenAI(api_key=api_key)
+
+# ✅ إنشاء تطبيق FastAPI
 app = FastAPI()
 
-# تفعيل CORS
+# ✅ إعداد CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -23,34 +26,42 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# استخراج النص من PDF أو DOCX
+# ✅ استخراج النص من ملف PDF أو DOCX
 def extract_text(file: UploadFile):
     if file.filename.endswith(".pdf"):
         reader = PyPDF2.PdfReader(file.file)
-        return " ".join(page.extract_text() or "" for page in reader.pages)
+        text = ""
+        for page in reader.pages:
+            text += page.extract_text() or ""
+        return text
     elif file.filename.endswith(".docx"):
         with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
             tmp.write(file.file.read())
             tmp_path = tmp.name
-        return docx2txt.process(tmp_path)
+        text = docx2txt.process(tmp_path)
+        os.remove(tmp_path)
+        return text
     else:
         return "Unsupported file type"
 
-# مسار الرفع
+# ✅ المسار الأساسي
+@app.get("/")
+def read_root():
+    return {"message": "ATS Analyzer API is running."}
+
+# ✅ مسار الرفع والتحليل
 @app.post("/upload/")
 async def upload_file(file: UploadFile = File(...)):
     text = extract_text(file)
-    
-    if not text.strip():
-        return {"error": "No extractable text found in file."}
 
-    # استدعاء GPT لتحليل النص
-    response = openai.chat.completions.create(
+    # ✅ استدعاء OpenAI لتحليل النص
+    response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[
-            {"role": "system", "content": "You are a helpful assistant that checks resumes."},
-            {"role": "user", "content": f"Analyze this resume and give me feedback:\n{text}"}
+            {"role": "system", "content": "You are an expert resume analyst."},
+            {"role": "user", "content": f"Analyze this resume:\n{text}"}
         ]
     )
-    
-    return {"feedback": response.choices[0].message.content}
+
+    analysis = response.choices[0].message.content
+    return {"analysis": analysis}
