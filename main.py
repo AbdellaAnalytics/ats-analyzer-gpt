@@ -1,57 +1,37 @@
-from fastapi import FastAPI, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
-from openai import OpenAI
 import os
-import tempfile
+from fastapi import FastAPI, UploadFile, File
+from dotenv import load_dotenv
+import openai
 import docx2txt
 import PyPDF2
-from dotenv import load_dotenv
+import tempfile
 
-# ✅ تحميل المتغيرات من .env
 load_dotenv()
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# ✅ إعداد FastAPI
 app = FastAPI()
 
-# ✅ إعداد CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# ✅ تحميل مفتاح API من environment
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-# ✅ دالة لاستخراج النص من ملفات PDF و DOCX
 def extract_text(file: UploadFile):
     if file.filename.endswith(".pdf"):
-        pdf_reader = PyPDF2.PdfReader(file.file)
-        text = ""
-        for page in pdf_reader.pages:
-            text += page.extract_text()
-        return text
+        reader = PyPDF2.PdfReader(file.file)
+        return "\n".join(page.extract_text() for page in reader.pages if page.extract_text())
     elif file.filename.endswith(".docx"):
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
-            tmp.write(file.file.read())
-            tmp_path = tmp.name
-        return docx2txt.process(tmp_path)
+        temp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
+        temp.write(file.file.read())
+        temp.close()
+        return docx2txt.process(temp.name)
     else:
-        return "Unsupported file type"
+        return "Unsupported file format"
 
-# ✅ مسار الرفع
 @app.post("/upload/")
 async def upload_file(file: UploadFile = File(...)):
-    extracted_text = extract_text(file)
-
-    response = client.chat.completions.create(
+    text = extract_text(file)
+    
+    response = openai.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[
-            {"role": "system", "content": "You are a helpful assistant that reviews CVs and gives feedback."},
-            {"role": "user", "content": extracted_text}
+            {"role": "user", "content": f"Analyze this resume:\n{text}"}
         ]
     )
 
-    return {"feedback": response.choices[0].message.content}
+    return {"result": response.choices[0].message.content}
