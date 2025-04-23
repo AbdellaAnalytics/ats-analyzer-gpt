@@ -1,51 +1,71 @@
-import os
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
-import PyPDF2
-import docx2txt
+import os
 import openai
+from dotenv import load_dotenv
+import docx2txt
+import PyPDF2
+import tempfile
+import aiofiles
+import aiofiles.os as aios
+from typing import Optional
 
-# تحميل متغيرات البيئة
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# إعداد FastAPI
 app = FastAPI()
 
-# إعدادات CORS (مهم لو هتربط بواجهة خارجية زي React أو HTML)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Consider restricting in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# دالة استخراج النص من ملف PDF أو DOCX
-def extract_text(file: UploadFile):
-    if file.filename.endswith(".pdf"):
-        reader = PyPDF2.PdfReader(file.file)
-        text = ""
-        for page in reader.pages:
-            text += page.extract_text() or ""
-        return text
-    elif file.filename.endswith(".docx"):
-        return docx2txt.process(file.file)
-    else:
-        return "Unsupported file format."
+async def extract_text_from_file(file: UploadFile) -> Optional[str]:
+    try:
+        content = ""
+        if file.filename.endswith(".pdf"):
+            # Read PDF content
+            pdf_content = await file.read()
+            reader = PyPDF2.PdfReader(io.BytesIO(pdf_content))
+            content = "\n".join([page.extract_text() or "" for page in reader.pages])
+            await file.seek(0)
+        elif file.filename.endswith(".docx"):
+            # Create temp file for docx
+            temp_path = None
+            try:
+                async with aiofiles.tempfile.NamedTemporaryFile("wb", suffix=".docx", delete=False) as tmp:
+                    temp_path = tmp.name
+                    await tmp.write(await file.read())
+                content = docx2txt.process(temp_path)
+            finally:
+                if temp_path and await aios.path.exists(temp_path):
+                    await aios.remove(temp_path)
+            await file.seek(0)
+        return content if content.strip() else None
+    except Exception as e:
+        print(f"Error processing file: {str(e)}")
+        return None
 
-# دالة المعالجة الذكية للنص بالذكاء الاصطناعي
 @app.post("/upload/")
 async def upload_file(file: UploadFile = File(...)):
-    text = extract_text(file)
+    if not file.filename.lower().endswith((".pdf", ".docx")):
+        raise HTTPException(400, detail="Only PDF and DOCX files are supported")
 
-    response = openai.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": "أنت مساعد خبير في تحليل السير الذاتية."},
-            {"role": "user", "content": f"قيم السيرة الذاتية التالية من حيث التنسيق، الكلمات المفتاحية، ومدى توافقها مع نظام ATS:\n\n{text}"}
-        ]
-    )
+    content = await extract_text_from_file(file)
+    if not content:
+        raise HTTPException(400, detail="Could not extract text from file or file is empty")
 
-    return {"analysis": response.choices[0].message.content}
+    try:
+        response = await openai.ChatCompletion.acreate(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "أنت مساعد توظيف متخصص في تحليل السير الذاتية بناءً على معايير ATS."},
+                {"role": "user", "content": content}
+            ]
+        )
+        return {"result": response.choices[0].message.content}
+    except Exception as e:
+        raise HTTPException(500, detail=f"Error processing with OpenAI: {str(e)}")
