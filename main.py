@@ -1,39 +1,43 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import os
-import openai
+from openai import AsyncOpenAI
 from dotenv import load_dotenv
+import os
 import docx2txt
 import PyPDF2
+import io
 import tempfile
 import aiofiles
 import aiofiles.os as aios
 from typing import Optional
 
+# تحميل المتغيرات البيئية
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
+openai_api_key = os.getenv("OPENAI_API_KEY")
+client = AsyncOpenAI(api_key=openai_api_key)
 
+# إنشاء التطبيق
 app = FastAPI()
 
+# إعداد CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Consider restricting in production
+    allow_origins=["*"],  # غيّر دي في الإنتاج
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# استخراج النص من ملفات PDF و DOCX
 async def extract_text_from_file(file: UploadFile) -> Optional[str]:
     try:
         content = ""
         if file.filename.endswith(".pdf"):
-            # Read PDF content
             pdf_content = await file.read()
             reader = PyPDF2.PdfReader(io.BytesIO(pdf_content))
             content = "\n".join([page.extract_text() or "" for page in reader.pages])
             await file.seek(0)
         elif file.filename.endswith(".docx"):
-            # Create temp file for docx
             temp_path = None
             try:
                 async with aiofiles.tempfile.NamedTemporaryFile("wb", suffix=".docx", delete=False) as tmp:
@@ -49,6 +53,7 @@ async def extract_text_from_file(file: UploadFile) -> Optional[str]:
         print(f"Error processing file: {str(e)}")
         return None
 
+# نقطة رفع الملف
 @app.post("/upload/")
 async def upload_file(file: UploadFile = File(...)):
     if not file.filename.lower().endswith((".pdf", ".docx")):
@@ -59,7 +64,7 @@ async def upload_file(file: UploadFile = File(...)):
         raise HTTPException(400, detail="Could not extract text from file or file is empty")
 
     try:
-        response = await openai.ChatCompletion.acreate(
+        response = await client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "أنت مساعد توظيف متخصص في تحليل السير الذاتية بناءً على معايير ATS."},
