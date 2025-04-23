@@ -1,20 +1,19 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-import os
+from openai import OpenAI
 from dotenv import load_dotenv
+import os
 import fitz  # PyMuPDF
 import docx2txt
-from openai import OpenAI
+import tempfile
 
-# Load environment variables
+# ✅ تحميل متغيرات البيئة
 load_dotenv()
-api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-client = OpenAI(api_key=api_key)
-
+# ✅ إعداد FastAPI
 app = FastAPI()
 
-# Allow frontend access
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -23,33 +22,39 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Function to extract text from PDF or DOCX
-def extract_text(file: UploadFile):
-    if file.filename.endswith(".pdf"):
+# ✅ استخراج النص من ملف PDF
+def extract_text_from_pdf(file_path):
+    with fitz.open(file_path) as pdf:
         text = ""
-        with fitz.open(stream=file.file.read(), filetype="pdf") as doc:
-            for page in doc:
-                text += page.get_text()
-        return text
-    elif file.filename.endswith(".docx"):
-        with open("temp.docx", "wb") as f:
-            f.write(file.file.read())
-        return docx2txt.process("temp.docx")
-    else:
-        return ""
+        for page in pdf:
+            text += page.get_text()
+    return text
 
+# ✅ استخراج النص من ملف DOCX
+def extract_text_from_docx(file_path):
+    return docx2txt.process(file_path)
+
+# ✅ تحليل الملف المرفوع
 @app.post("/upload/")
 async def upload_file(file: UploadFile = File(...)):
-    text = extract_text(file)
-    if not text:
-        return {"error": "Unsupported file type or empty content"}
+    with tempfile.NamedTemporaryFile(delete=False, suffix=file.filename) as tmp:
+        tmp.write(await file.read())
+        tmp_path = tmp.name
 
+    if file.filename.endswith(".pdf"):
+        text = extract_text_from_pdf(tmp_path)
+    elif file.filename.endswith(".docx"):
+        text = extract_text_from_docx(tmp_path)
+    else:
+        return {"error": "Unsupported file type. Please upload a PDF or DOCX."}
+
+    # ✅ طلب لتحليل النص باستخدام GPT
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[
-            {"role": "system", "content": "You are an ATS Resume Analyzer."},
-            {"role": "user", "content": f"Analyze this resume and give me feedback:\n{text}"}
+            {"role": "system", "content": "You are an expert ATS resume checker."},
+            {"role": "user", "content": f"Analyze this resume:\n{text}"}
         ]
     )
 
-    return {"analysis": response.choices[0].message.content}
+    return {"result": response.choices[0].message.content}
