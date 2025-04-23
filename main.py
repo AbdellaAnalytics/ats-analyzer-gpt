@@ -14,7 +14,7 @@ client = OpenAI(api_key=api_key)
 
 app = FastAPI()
 
-# CORS setup
+# Allow frontend access
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -23,6 +23,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Function to extract text from PDF or DOCX
 def extract_text(file: UploadFile):
     if file.filename.endswith(".pdf"):
         text = ""
@@ -31,8 +32,8 @@ def extract_text(file: UploadFile):
                 text += page.get_text()
         return text
     elif file.filename.endswith(".docx"):
-        with open("temp.docx", "wb") as temp_file:
-            temp_file.write(file.file.read())
+        with open("temp.docx", "wb") as f:
+            f.write(file.file.read())
         return docx2txt.process("temp.docx")
     else:
         return ""
@@ -47,7 +48,7 @@ async def upload_file(file: UploadFile = File(...)):
         model="gpt-3.5-turbo",
         messages=[
             {"role": "system", "content": "You are an ATS Resume Analyzer."},
-            {"role": "user", "content": f"Analyze this resume and give me your feedback:\n{text}"}
+            {"role": "user", "content": f"Analyze this resume and give me feedback:\n{text}"}
         ]
     )
 
