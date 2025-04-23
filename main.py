@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import os
-from openai import OpenAI
+import openai
 from dotenv import load_dotenv
 import docx2txt
 import PyPDF2
@@ -11,15 +11,14 @@ import aiofiles.os as aios
 from typing import Optional
 import io
 
-# Load environment variables
 load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Change to specific domains in production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -56,7 +55,7 @@ async def upload_file(file: UploadFile = File(...)):
         raise HTTPException(400, detail="Could not extract text or file is empty")
 
     try:
-        response = client.chat.completions.create(
+        response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "أنت مساعد توظيف متخصص في تحليل السير الذاتية بناءً على معايير ATS."},
