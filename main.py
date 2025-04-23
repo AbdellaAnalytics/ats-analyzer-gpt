@@ -1,8 +1,8 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from openai import AsyncOpenAI
-from dotenv import load_dotenv
 import os
+from openai import OpenAI
+from dotenv import load_dotenv
 import docx2txt
 import PyPDF2
 import io
@@ -11,24 +11,19 @@ import aiofiles
 import aiofiles.os as aios
 from typing import Optional
 
-# تحميل المتغيرات البيئية
 load_dotenv()
-openai_api_key = os.getenv("OPENAI_API_KEY")
-client = AsyncOpenAI(api_key=openai_api_key)
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# إنشاء التطبيق
 app = FastAPI()
 
-# إعداد CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # غيّر دي في الإنتاج
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# استخراج النص من ملفات PDF و DOCX
 async def extract_text_from_file(file: UploadFile) -> Optional[str]:
     try:
         content = ""
@@ -53,7 +48,6 @@ async def extract_text_from_file(file: UploadFile) -> Optional[str]:
         print(f"Error processing file: {str(e)}")
         return None
 
-# نقطة رفع الملف
 @app.post("/upload/")
 async def upload_file(file: UploadFile = File(...)):
     if not file.filename.lower().endswith((".pdf", ".docx")):
@@ -64,7 +58,7 @@ async def upload_file(file: UploadFile = File(...)):
         raise HTTPException(400, detail="Could not extract text from file or file is empty")
 
     try:
-        response = await client.chat.completions.create(
+        response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "أنت مساعد توظيف متخصص في تحليل السير الذاتية بناءً على معايير ATS."},
