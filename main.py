@@ -2,26 +2,16 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import os
 from openai import OpenAI
-
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-response = client.chat.completions.create(
-    model="gpt-3.5-turbo",
-    messages=[
-        {"role": "system", "content": "أنت مساعد توظيف..."},
-        {"role": "user", "content": content}
-    ]
-)
-
 from dotenv import load_dotenv
 import docx2txt
 import PyPDF2
-import io
 import tempfile
 import aiofiles
 import aiofiles.os as aios
 from typing import Optional
+import io
 
+# Load environment variables
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -29,7 +19,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Change to specific domains in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -37,24 +27,21 @@ app.add_middleware(
 
 async def extract_text_from_file(file: UploadFile) -> Optional[str]:
     try:
-        content = ""
         if file.filename.endswith(".pdf"):
             pdf_content = await file.read()
             reader = PyPDF2.PdfReader(io.BytesIO(pdf_content))
-            content = "\n".join([page.extract_text() or "" for page in reader.pages])
-            await file.seek(0)
+            return "\n".join([page.extract_text() or "" for page in reader.pages])
         elif file.filename.endswith(".docx"):
             temp_path = None
             try:
                 async with aiofiles.tempfile.NamedTemporaryFile("wb", suffix=".docx", delete=False) as tmp:
                     temp_path = tmp.name
                     await tmp.write(await file.read())
-                content = docx2txt.process(temp_path)
+                return docx2txt.process(temp_path)
             finally:
                 if temp_path and await aios.path.exists(temp_path):
                     await aios.remove(temp_path)
-            await file.seek(0)
-        return content if content.strip() else None
+        return None
     except Exception as e:
         print(f"Error processing file: {str(e)}")
         return None
@@ -66,7 +53,7 @@ async def upload_file(file: UploadFile = File(...)):
 
     content = await extract_text_from_file(file)
     if not content:
-        raise HTTPException(400, detail="Could not extract text from file or file is empty")
+        raise HTTPException(400, detail="Could not extract text or file is empty")
 
     try:
         response = client.chat.completions.create(
@@ -78,4 +65,4 @@ async def upload_file(file: UploadFile = File(...)):
         )
         return {"result": response.choices[0].message.content}
     except Exception as e:
-        raise HTTPException(500, detail=f"Error processing with OpenAI: {str(e)}")
+        raise HTTPException(500, detail=f"Error from OpenAI: {str(e)}")
