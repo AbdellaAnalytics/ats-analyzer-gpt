@@ -2,6 +2,17 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import os
 from openai import OpenAI
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+response = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    messages=[
+        {"role": "system", "content": "أنت مساعد توظيف..."},
+        {"role": "user", "content": content}
+    ]
+)
+
 from dotenv import load_dotenv
 import docx2txt
 import PyPDF2
