@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from openai import OpenAI
 import os
-import openai
 from dotenv import load_dotenv
 import docx2txt
 import PyPDF2
@@ -9,12 +9,12 @@ import tempfile
 
 # تحميل متغيرات البيئة
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
+openai_api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=openai_api_key)
 
-# إنشاء التطبيق
 app = FastAPI()
 
-# السماح بالوصول من جميع المواقع (CORS)
+# إعداد CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -23,29 +23,38 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# استخراج النص من ملفات PDF و DOCX
-def extract_text_from_file(file: UploadFile):
+# استخراج النص من PDF أو DOCX
+def extract_text(file: UploadFile):
     if file.filename.endswith(".pdf"):
         reader = PyPDF2.PdfReader(file.file)
-        return "\n".join([page.extract_text() or "" for page in reader.pages])
+        text = ""
+        for page in reader.pages:
+            text += page.extract_text() or ""
+        return text
     elif file.filename.endswith(".docx"):
         with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
             tmp.write(file.file.read())
-            return docx2txt.process(tmp.name)
-    return ""
+            tmp_path = tmp.name
+        text = docx2txt.process(tmp_path)
+        os.unlink(tmp_path)
+        return text
+    else:
+        return "Unsupported file format"
 
-# تحليل السيرة الذاتية باستخدام GPT
+# نقطة الرفع
 @app.post("/upload/")
 async def upload_file(file: UploadFile = File(...)):
-    content = extract_text_from_file(file)
-    if not content:
-        return {"error": "الملف لا يحتوي على نص يمكن تحليله."}
+    text = extract_text(file)
+    
+    if not text:
+        return {"error": "Couldn't extract any text from the file."}
 
-    response = await openai.ChatCompletion.acreate(
+    response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[
-            {"role": "system", "content": "أنت مساعد توظيف متخصص في تحليل السير الذاتية بناءً على معايير ATS."},
-            {"role": "user", "content": content}
+            {"role": "system", "content": "You are a helpful resume analyzer."},
+            {"role": "user", "content": f"Analyze this resume:\n{text}"}
         ]
     )
+
     return {"result": response.choices[0].message.content}
